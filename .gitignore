@@ -1,0 +1,21 @@
+# Electron build output
+electron_final/dist/
+electron_final/out/
+electron_final/*.exe
+electron_final/*.zip
+
+# Electron binaries
+electron_final/**/*.dll
+electron_final/**/*.pak
+electron_final/**/*.dat
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Env
+.env
+
+out/

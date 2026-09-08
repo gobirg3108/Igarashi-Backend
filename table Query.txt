@@ -1,0 +1,50 @@
+CREATE TABLE users (
+    id INT IDENTITY(1,1) PRIMARY KEY,
+    fullname VARCHAR(100),
+    username VARCHAR(100),
+    password VARCHAR(200),
+    page VARCHAR(500),
+    status INT DEFAULT 1,
+    created_at DATETIME DEFAULT GETDATE(),
+    updated_at DATETIME DEFAULT GETDATE()
+);
+
+CREATE TABLE excel_template (
+    id INT IDENTITY(1,1) PRIMARY KEY,
+    tablename VARCHAR(255),
+    field VARCHAR(255),
+    header VARCHAR(255),
+    header_bg VARCHAR(50),
+    header_text VARCHAR(50),
+    content_bg VARCHAR(50),
+    content_text VARCHAR(50),
+    display INT,
+    DATA_TYPE VARCHAR(50),
+    decimalpoint INT,
+    template_name VARCHAR(255),
+    order_no INT,
+    roundof INT,
+    created_at DATETIME DEFAULT GETDATE(),
+    updated_at DATETIME NULL,
+    status INT
+);
+
+
+CREATE TABLE export_tables (
+    id INT IDENTITY(1,1) PRIMARY KEY,
+    machinename VARCHAR(200) NOT NULL,
+    exportname VARCHAR(200) NOT NULL,
+    created_at DATETIME DEFAULT GETDATE(),
+    updated_at DATETIME DEFAULT GETDATE(),
+    status INT DEFAULT 1
+);
+
+CREATE TABLE export_assemblytables (
+    id INT IDENTITY(1,1) PRIMARY KEY,
+    machinename VARCHAR(200) NOT NULL,
+    exportname VARCHAR(200) NOT NULL,
+    menu VARCHAR(200) NOT NULL,
+    created_at DATETIME DEFAULT GETDATE(),
+    updated_at DATETIME DEFAULT GETDATE(),
+    status INT DEFAULT 1
+);

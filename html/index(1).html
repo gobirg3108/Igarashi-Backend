@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IGARASHI</title>
+    <style>
+        /* Basic Reset */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Body styling */
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+        }
+
+        /* Main container styling */
+        .container {
+            padding: 20px;
+            text-align: center;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            width: 100%;
+            margin-bottom: 20px;
+            border-bottom: 1px solid black;
+            text-align: center;
+        }
+
+        /* Date selection styling */
+        .date-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-top: 4%;
+            min-height: 77px;
+        }
+
+        .date-input {
+            display: flex;
+            gap: 10px;
+            flex-direction: row;
+            align-items: center;
+        }
+
+        label {
+            font-weight: bold;
+            color: #555;
+            width: 100px;
+        }
+
+        input[type="date"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 400px;
+        }
+
+        .export-button,
+        .export-file-button {
+            margin-top: 20px;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .export-button {
+            background-color: #4CAF50;
+        }
+
+        .export-file-button {
+            background-color: #5991db;
+        }
+
+        .export-button:hover,
+        .export-file-button:hover {
+            background-color: #45a049;
+        }
+
+        .date_full_container {
+            width: 100%;
+            max-height: 900px;
+            max-width: 800px;
+        }
+
+        .button_full_container {
+            display: flex;
+            justify-content: end;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        /* Spinner styling */
+        .spinner {
+            margin-top: 20px;
+            width: 24px;
+            height: 24px;
+            border: 4px solid rgba(0, 0, 0, 0.2);
+            border-top-color: #3498db;
+            border-radius: 50%;
+            animation: spin 1s infinite linear;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Responsive date container */
+        @media (min-width: 600px) {
+            .date-container {
+                flex-direction: row;
+                justify-content: center;
+            }
+        }
+
+        /* Sliding form styles */
+        .form-container {
+            position: fixed;
+            right: -100%;
+            top: 0;
+            width: 100%;
+            max-width: 400px;
+            height: 100vh;
+            background-color: #f3f4f6;
+            border-left: 2px solid #333;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.3);
+            transition: right 0.4s ease;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+        }
+
+        .form-content {
+            width: 100%;
+        }
+
+        .form-content label {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-content input,
+        .form-content textarea,
+        .form-content button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+
+        .form-content textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .arrow-button {
+            position: fixed;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: #333;
+            color: #fff;
+            border: none;
+            padding: 12px;
+            cursor: pointer;
+            font-size: 24px;
+            transition: right 0.4s ease;
+            border-top-left-radius: 4px;
+            border-bottom-left-radius: 4px;
+        }
+
+        .form-container.open {
+            right: 0;
+        }
+
+        .form-container.open~.arrow-button {
+            right: 600px;
+        }
+
+        @media (max-width: 768px) {
+            .form-container {
+                max-width: 100%;
+            }
+
+            .form-container.open~.arrow-button {
+                right: 100%;
+            }
+        }
+
+        .form-container {
+            position: fixed;
+            right: -100%;
+            top: 0;
+            width: 100%;
+            max-width: 600px;
+            height: 100vh;
+            background-color: #ffffff;
+            border-left: 3px solid #4CAF50;
+            box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+            transition: right 0.5s ease;
+            display: flex;
+            flex-direction: column;
+            padding: 30px 20px;
+            align-items: center;
+        }
+
+        .form-container.open {
+            right: 0;
+        }
+
+        .form-content {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .form-content label {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-content input,
+        .form-content textarea,
+        .form-content button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-content input:focus,
+        .form-content textarea:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+
+        .form-content textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .form-content button {
+            color: #fff;
+            background-color: #4CAF50;
+            cursor: pointer;
+            font-weight: bold;
+            border: none;
+            transition: background-color 0.3s;
+        }
+
+        .form-content button:hover {
+            background-color: #45a049;
+        }
+
+        .arrow-button {
+            position: fixed;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: #4CAF50;
+            color: #fff;
+            border: none;
+            padding: 14px;
+            cursor: pointer;
+            font-size: 24px;
+            border-radius: 4px 0 0 4px;
+            transition: right 0.5s ease;
+        }
+
+        .arrow-button:hover {
+            background-color: #45a049;
+        }
+
+        .form-content .time-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .time-row label {
+            width: auto;
+        }
+
+        .time-row input[type="time"] {
+            flex: 1;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="title">
+        <img src="./igarashi-removebg-preview.png" alt="igarashi">
+    </div>
+
+    <div class="container">
+        <form onsubmit="export_xlsx(event)">
+            <div class="date_full_container">
+                <div class="date-container">
+                    <div class="date-input">
+                        <label for="from-date">From Date</label>
+                        <input type="date" id="fd" required>
+                    </div>
+                </div>
+                <div class="date-container">
+                    <div class="date-input">
+                        <label for="to-date">To Date</label>
+                        <input type="date" id="td" required>
+                    </div>
+                </div>
+                <div class="button_full_container">
+                    <button class="export-button" id="export" type="submit">Export</button>
+                    <div class="spinner" id="spinner" style="display: none;"></div>
+                </div>
+                <div class="button_full_container" id="indicate">
+                    <p id="result">! Exported</p>
+                    <button class="export-file-button" id="file" type="button">Open File</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Sliding form container -->
+    <div class="form-container" id="formContainer">
+        <h2>Settings</h2>
+        <div class="form-content">
+            <label for="name">Server Name</label>
+            <input type="text" name="server" id="server" placeholder="Enter your server name">
+            <label for="name">Login Name </label>
+            <input type="text" name="login_name" id="login_name" placeholder="Enter your Login Name - optional">
+            <label for="name">Login Password </label>
+            <input type="text" name="login_password" id="login_password"
+                placeholder="Enter your Login Password - optional">
+
+            <label for="database">Database</label>
+            <input type="email" name="db" id="db" placeholder="Enter your Database">
+
+            <label for="database">Table Name</label>
+            <input type="text" name="table" id="table" placeholder="Enter your table name">
+
+            <label for="date">Target Date Field</label>
+            <input type="text" id="date_field" name="date_field" placeholder="Enter your Date">
+
+            <label for="email">Gmail</label>
+            <input type="email" id="user" name="user" placeholder="Enter your email">
+
+            <label for="Password">App Password</label>
+            <input type="password" id="pass" name="pass" placeholder="Enter your password">
+
+            <h3 for="start-time">Shift-1</h3>
+
+            <div class="time-row" style="display: flex;align-items: center; justify-content: space-between;">
+                <div>
+                    <label for="start-time">Start Time</label>
+                    <input type="time" id="shift1_start" name="shift1_start" placeholder="Enter your time">
+                </div>
+                <div>
+                    <label for="end-time">End Time</label>
+                    <input type="time" id="shift1_end" name="shift1_end" placeholder="Enter your time">
+                </div>
+            </div>
+
+            <h3 for="start-time">Shift-2</h3>
+
+            <div class="time-row" style="display: flex;align-items: center; justify-content: space-between;">
+                <div>
+                    <label for="start-time">Start Time</label>
+                    <input type="time" id="shift2_start" name="shift2_start" placeholder="Enter your time">
+                </div>
+                <div>
+                    <label for="end-time">End Time</label>
+                    <input type="time" id="shift2_end" name="shift2_end" placeholder="Enter your time">
+                </div>
+            </div>
+            <h3 for="start-time">Shift-3</h3>
+
+            <div class="time-row" style="display: flex;align-items: center; justify-content: space-between;">
+
+                <div>
+                    <label for="start-time">Start Time</label>
+                    <input type="time" id="shift3_start" name="shift3_start" placeholder="Enter your time">
+                </div>
+                <div>
+                    <label for="end-time">End Time</label>
+                    <input type="time" id="shift3_end" name="shift3_end" placeholder="Enter your time">
+                </div>
+            </div>
+            <button type="submit" id="metadata">Save</button>
+        </div>
+    </div>
+
+    <!-- Arrow button to open/close the form -->
+    <button class="arrow-button" id="toggleButton">&#x25C0;</button>
+    <script>
+        const formContainer = document.getElementById('formContainer');
+        const toggleButton = document.getElementById('toggleButton');
+        const metasubmit = document.getElementById('metadata');
+        const server = document.getElementById("server")
+        const db = document.getElementById("db")
+        const table = document.getElementById("table")
+        const date_field = document.getElementById("date_field")
+        const user = document.getElementById("user")
+        const pass = document.getElementById("pass")
+        const shift1_start = document.getElementById("shift1_start")
+        const login_name = document.getElementById("login_name")
+        const login_password = document.getElementById("login_password")
+        const shift2_start = document.getElementById("shift2_start")
+        const shift3_start = document.getElementById("shift3_start")
+        const shift1_end = document.getElementById("shift1_end")
+        const shift2_end = document.getElementById("shift2_end")
+        const shift3_end = document.getElementById("shift3_end")
+        metasubmit.addEventListener("click", async () => {
+            const restart = confirm("Due to the file changes restart needed")
+            if (restart) {
+                const data = {
+                    db: db.value || "",
+                    server: server.value || "",
+                    table: table.value || "",
+                    date_field: date_field.value || "",
+                    user: user.value || "",
+                    pass: pass.value || "",
+                    login_name: login_name.value || "",
+                    login_password: login_password.value || "",
+                    shift_1: [shift1_start.value || "", shift1_end.value || ""],
+                    shift_2: [shift2_start.value || "", shift2_end.value || ""],
+                    shift_3: [shift3_start.value || "", shift3_end.value || ""],
+
+                }
+                const response = await window.versions.metadata_write(data)
+                if (response === "success") {
+                    formContainer.classList.toggle('open');
+                    toggleButton.classList.toggle('open');
+                    toggleButton.textContent = formContainer.classList.contains('open') ? '◀' : '▶';
+
+                } else {
+
+                }
+            } else {
+                formContainer.classList.toggle('open');
+                toggleButton.classList.toggle('open');
+                toggleButton.textContent = formContainer.classList.contains('open') ? '◀' : '▶';
+            }
+
+        })
+
+
+        toggleButton.addEventListener('click', async () => {
+            // console.log(formContainer.classList.contains('open')&&true);
+            if (!formContainer.classList.contains('open')) {
+
+                const response = await window.versions.metadata()
+                console.log(response);
+                db.value = response.db
+                server.value = response.server
+                table.value = response.table
+                date_field.value = response.date_field
+                user.value = response.user
+                pass.value = response.pass
+                login_name.value = response.login_name
+                login_password.value = response.login_password
+                shift1_start.value = response.shift_1[0]
+                shift2_start.value = response.shift_2[0]
+                shift3_start.value = response.shift_3[0]
+                shift1_end.value = response.shift_1[1]
+                shift2_end.value = response.shift_2[1]
+                shift3_end.value = response.shift_3[1]
+            }
+
+            formContainer.classList.toggle('open');
+            toggleButton.classList.toggle('open');
+            toggleButton.textContent = formContainer.classList.contains('open') ? '◀' : '▶';
+
+
+        });
+        let path;
+        let file = document.getElementById("file");
+        async function export_xlsx(event) {
+            event.preventDefault()
+            const fromdate = document.getElementById("fd")
+            let ex = document.getElementById("export")
+            let indicate = document.getElementById("indicate")
+            const todate = document.getElementById("td")
+            const spinner = document.getElementById("spinner");
+            const p = document.getElementById("result");
+            if (fromdate.value > todate.value) {
+                alert("From-Date Less Then To-Date")
+            } else {
+                ex.style.display = 'none';
+                spinner.style.display = 'block';
+
+                new Promise(async (resolve, reject) => {
+                    const result = await window.versions.ping({ fd: fromdate.value, td: todate.value })
+                    resolve(result)
+                }).then((response) => {
+                    console.log(response);
+
+                    if (response && typeof response === 'string' && response.includes("DOWNLOAD")) {
+                        path = response
+                        indicate.style.display = "block"
+                    } else {
+                        path = ""
+                        indicate.style.display = "block"
+                        file.style.display = "none"
+                        p.innerText = "! Failed"
+                    }
+                    spinner.style.display = 'none';
+                    ex.style.display = 'block';
+                })
+
+            }
+        }
+        indicate.style.display = 'none';
+        file.addEventListener("click", function () {
+            if (path) { window.versions.openfolder(path) }
+
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,13 @@
+{
+  "server": "DESKTOP-14SN92V\\SQLEXPRESS",
+  "db": "Igarashi",
+  "login_name": "",
+  "login_password": "",
+  "date_field": "Date_Time",
+  "table": "ProductionData",
+  "user": "premkumarintech@gmail.com",
+  "pass": "pjpbdxhtqqdvijyh",
+  "shift_1": ["", ""],
+  "shift_2": ["", ""],
+  "shift_3": ["", ""]
+}

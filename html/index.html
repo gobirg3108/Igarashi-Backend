@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IGARASHI </title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+        }
+
+        .container {
+            padding: 20px;
+            text-align: center;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            width: 100%;
+            margin-bottom: 20px;
+            border-bottom: 1px solid black;
+            text-align: center;
+        }
+
+        .date-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-top: 4%;
+            min-height: 77px;
+
+        }
+
+        .date-input {
+            display: flex;
+            gap: 10px;
+            flex-direction: row;
+            align-items: center;
+        }
+
+        label {
+            font-weight: bold;
+            color: #555;
+            width: 100px;
+        }
+
+        input[type="date"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 400px;
+        }
+
+        .export-button {
+            margin-top: 20px;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background-color: #4CAF50;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .export-button:hover {
+            background-color: #45a049;
+        }
+        .export-file-button{
+            margin-top: 20px;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background-color: #5991db;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        
+        .export-file-button:hover{
+            background-color: #45a049;
+        }
+        .date_full_container {
+            /* display: flex; */
+            width: 100%;
+            max-height: 900px;
+            /* height: 100%; */
+            max-width: 800px;
+        }
+
+        .button_full_container {
+            display: flex;
+            justify-content: end;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        @media (min-width: 600px) {
+            .date-container {
+                flex-direction: row;
+                justify-content: center;
+            }
+        }
+
+        .spinner {
+            margin-top: 20px;
+            width: 24px;
+            height: 24px;
+            border: 4px solid rgba(0, 0, 0, 0.2);
+            border-top-color: #3498db;
+            border-radius: 50%;
+            animation: spin 1s infinite linear;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="title">
+        <img src="./igarashi-removebg-preview.png" alt="igarashi">
+    </div>
+
+    <div class="container">
+        <!-- <div class="title">Data Export with Date Range</div> -->
+        <form onsubmit="export_xlsx(event)">
+            <div class="date_full_container">
+                <div class="date-container">
+                    <div class="date-input">
+                        <label for="from-date">From Date</label>
+                        <input type="date" id="fd" required>
+                    </div>
+                </div>
+                <div class="date-container">
+                    <div class="date-input">
+                        <label for="to-date">To Date</label>
+                        <input type="date" id="td" required>
+                    </div>
+                </div>
+                <div class="button_full_container">
+                    <button class="export-button" id="export" type="submit">Export</button>
+                    <div class="spinner" id="spinner" style="display: none;"></div>
+                </div>
+                <div class="button_full_container" id="indicate">
+                  <p >! Exported</p>  <button class="export-file-button"  id="file" type="button">Open File</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    <script>
+
+        let path;
+        let file = document.getElementById("file");
+async function export_xlsx(event) {
+    event.preventDefault()
+    const fromdate=document.getElementById("fd")
+    let ex=document.getElementById("export")
+        let indicate=document.getElementById("indicate")
+    const todate=document.getElementById("td")
+    const spinner = document.getElementById("spinner");
+    if(fromdate.value>todate.value){
+        alert("From-Date Less Then To-Date")
+    }else{
+        // ex.disabled=true
+        ex.style.display = 'none';
+        spinner.style.display = 'block';
+    //    console.log(fromdate.value);
+       const response = await window.versions.ping({fd:fromdate.value,td:todate.value})
+//   console.log(response) // prints out 'pong'
+  if(typeof response==='string'){
+    path=response
+    indicate.style.display="block"
+   // Hi
+  }
+  spinner.style.display = 'none'; 
+  ex.style.display = 'block';
+    // console.log(todate.value); 
+    // window.versions.openfolder(response)
+    }
+    
+    
+}
+// document.addEventListener("DOMContentLoaded", function() {
+  
+indicate.style.display = 'none';
+file.addEventListener("click", function() {
+        window.versions.openfolder(path)
+    });
+// });
+    </script>
+</body>
+
+</html>

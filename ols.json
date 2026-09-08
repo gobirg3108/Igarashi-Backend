@@ -1,0 +1,16 @@
+{
+  "db": "IGARASHI_DB",
+  "server": "DESKTOP-SJ58R42\\SQLEXPRESS",
+  "table": "DXP_MD_Motor_EP_DMC",
+  "date_field": "Date_Time",
+  "user": "premkumarintech@gmail.com",
+  "pass": "pjpbdxhtqqdvijyh",
+  "login_name": "sa",
+  "login_password": "Sq30@2025",
+  "port": "5173",
+  "xlsx_path": ["../", "../"],
+  "deploy": false,
+  "shift_1": ["19:25", "12:23"],
+  "shift_2": ["10:17", "04:13"],
+  "shift_3": ["10:24", "14:28"]
+}
