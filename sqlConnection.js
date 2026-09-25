@@ -16,6 +16,9 @@ const config = {
   options: {
     trustedConnection: false,
     trustServerCertificate: true,
+    // SQL DATETIME values in this database are stored as local machine time.
+    // Prevent node-mssql/tedious from interpreting them as UTC (+05:30 shift in UI).
+    useUTC: false,
   },
 };
 

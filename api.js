@@ -4,7 +4,6 @@ const fs = require("fs");
 const os = require("os");
 const sql = require("./sqlConnection.js").getsql();
 const mssql = require("mssql");
-const bcrypt = require("bcryptjs");
 
 // const nodemailer = require('nodemailer');
 const { Worker } = require("worker_threads");
@@ -30,6 +29,7 @@ const config =
           trustedConnection: false, // Must be false for SQL auth
           trustServerCertificate: true, // Set to true to avoid certificate issues
           enableArithAbort: true,
+          useUTC: false,
         },
         driver: "mssql",
       }
@@ -41,6 +41,7 @@ const config =
           trustedConnection: true, // Must be true for Windows auth
           trustServerCertificate: true, // Set to true
           enableArithAbort: true,
+          useUTC: false,
         },
         driver: "mssql",
       };
@@ -767,6 +768,79 @@ const createPDF_concurrent = async (data, js) => {
   });
 };
 
+
+const createTraceabilityPDF_concurrent = async (data) => {
+  const dmcCode = String(data?.getDmc ?? data?.dmcCode ?? "").trim();
+
+  if (!dmcCode) {
+    return { success: false, message: "Please enter DMC Code" };
+  }
+
+  const sections = (await getdmcdata({ getDmc: dmcCode })).filter(
+    (item) => Array.isArray(item?.data) && item.data.length > 0,
+  );
+
+  if (!sections.length) {
+    return { success: false, message: "No traceability data found for this DMC code" };
+  }
+
+  const workerPath = path.join(
+    __dirname,
+    "worker",
+    "traceability_pdf_worker.js",
+  );
+  const logoPath = path.join(
+    __dirname,
+    "html",
+    "igarashi-removebg-preview.png",
+  );
+
+  return await new Promise((resolve, reject) => {
+    const worker = new Worker(workerPath);
+    let settled = false;
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate().catch(() => {});
+      callback(value);
+    };
+
+    worker.once("message", (message) => {
+      if (message?.success) {
+        finish(resolve, message);
+      } else {
+        finish(
+          reject,
+          new Error(message?.message || "Traceability PDF export failed"),
+        );
+      }
+    });
+
+    worker.once("error", (error) => finish(reject, error));
+
+    worker.once("exit", (code) => {
+      if (!settled && code !== 0) {
+        finish(
+          reject,
+          new Error(`Traceability PDF worker stopped with exit code ${code}`),
+        );
+      }
+    });
+
+    worker.postMessage({
+      dmcCode,
+      sections,
+      orientation:
+        String(data?.orientation || "landscape").toLowerCase() === "portrait"
+          ? "portrait"
+          : "landscape",
+      traceabilityRoot: data?.traceabilityRoot,
+      logoPath,
+    });
+  });
+};
+
 const gettable_name = async (params) => {
   const result = await sql.query(`SELECT TABLE_NAME 
 FROM INFORMATION_SCHEMA.TABLES 
@@ -946,13 +1020,12 @@ const adduser = async (data) => {
       };
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
-
     const request = await sql.request();
 
     request.input("fullname", mssql.VarChar(100), fullname?.trim());
     request.input("username", mssql.VarChar(100), username?.trim());
-    request.input("password", mssql.VarChar(200), hashedPassword);
+    // Plain-text password storage requested for this application.
+    request.input("password", mssql.VarChar(200), password);
     request.input("page", mssql.VarChar(500), page);
 
     const result = await request.query(`
@@ -993,6 +1066,7 @@ const getusers = async () => {
       id,
       fullname,
       username,
+      password,
       page,
       status,
       created_at,
@@ -1076,9 +1150,8 @@ const updateuser = async (data) => {
     `;
 
     if (password?.trim()) {
-      const hashedPassword = await bcrypt.hash(password, 12);
-
-      request.input("password", mssql.VarChar(200), hashedPassword);
+      // Blank means keep current password; a supplied password is stored directly.
+      request.input("password", mssql.VarChar(200), password);
 
       query += `,
         password = @password
@@ -1149,59 +1222,21 @@ const userlogin = async (data) => {
     const request = await sql.request();
 
     request.input("username", mssql.VarChar(100), username);
+    request.input("password", mssql.VarChar(200), password);
 
+    // Plain-text credential comparison by requirement.
     const result = await request.query(`
-      SELECT id, username, password, page
+      SELECT TOP 1 id, username, page
       FROM users
       WHERE username = @username
+        AND password = @password
         AND status = 1
+      ORDER BY id ASC
     `);
 
     const user = result?.recordset?.[0];
 
     if (!user) {
-      return {
-        user: "",
-        status: false,
-      };
-    }
-
-    const storedPassword = user.password || "";
-
-    let passwordMatched = false;
-
-    const isHashed =
-      storedPassword.startsWith("$2a$") ||
-      storedPassword.startsWith("$2b$") ||
-      storedPassword.startsWith("$2y$");
-
-    if (isHashed) {
-      passwordMatched = await bcrypt.compare(password, storedPassword);
-    } else {
-      // Old plaintext users — temporary backward compatibility
-      passwordMatched = password === storedPassword;
-
-      // If old password is correct, automatically upgrade it to bcrypt
-      if (passwordMatched) {
-        const hashedPassword = await bcrypt.hash(password, 12);
-
-        const updateRequest = await sql.request();
-
-        updateRequest.input("id", mssql.Int, user.id);
-
-        updateRequest.input("password", mssql.VarChar(200), hashedPassword);
-
-        await updateRequest.query(`
-          UPDATE users
-          SET
-            password = @password,
-            updated_at = GETDATE()
-          WHERE id = @id
-        `);
-      }
-    }
-
-    if (!passwordMatched) {
       return {
         user: "",
         status: false,
@@ -1245,14 +1280,16 @@ const tablerename = async (data) => {
           exportname,
           created_at,
           updated_at,
-          status
+          status,
+          traceability_order
         )
         VALUES (
           @oldName,
           @newName,
           GETDATE(),
           GETDATE(),
-          1
+          1,
+          ISNULL((SELECT MAX(traceability_order) + 1 FROM export_tables), 1)
         )
       `);
 
@@ -1283,6 +1320,15 @@ const tablerename = async (data) => {
       const result = await request.query(`
         UPDATE export_tables
         SET status = @status,
+            traceability_order = CASE
+              WHEN @status = 1 THEN ISNULL(
+                (SELECT MAX(et.traceability_order) + 1
+                 FROM export_tables et
+                 WHERE et.machinename <> @oldName),
+                1
+              )
+              ELSE traceability_order
+            END,
             updated_at = GETDATE()
         WHERE machinename = @oldName
       `);
@@ -1399,6 +1445,18 @@ const gettablename = async () => {
   );
   const reNameTables = reNameTablesRes?.recordset;
 
+  const dmcTablesRes = await sql.query(`
+    SELECT DISTINCT t.name AS table_name
+    FROM sys.tables t
+    INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+    INNER JOIN sys.columns c ON c.object_id = t.object_id
+    WHERE s.name = N'dbo'
+      AND c.name = N'DMC_Data';
+  `);
+  const dmcTableNames = new Set(
+    (dmcTablesRes?.recordset || []).map((row) => String(row.table_name || "")),
+  );
+
   const mergedArray = allTables?.map((table) => {
     const match = reNameTables?.find((x) => x.machinename === table.TABLE_NAME);
 
@@ -1406,6 +1464,8 @@ const gettablename = async () => {
       TABLE_NAME: table?.TABLE_NAME,
       exportname: match?.exportname ?? "",
       status: match?.status ?? 0,
+      traceability_order: match?.traceability_order ?? null,
+      has_dmc_data: dmcTableNames.has(table?.TABLE_NAME),
     };
   });
 
@@ -1650,6 +1710,100 @@ const tableHasColumn = async (tableName, columnName) => {
   return Boolean(result?.recordset?.[0]?.found);
 };
 
+const getBarcodeScanSetting = async () => {
+  try {
+    const result = await sql.query(`
+      SELECT TOP (1) barcode_scan_enabled
+      FROM dbo.traceability_settings
+      WHERE id = 1;
+    `);
+
+    return {
+      success: true,
+      barcodeEnabled: Boolean(result?.recordset?.[0]?.barcode_scan_enabled),
+    };
+  } catch (error) {
+    console.error("Error fetching barcode scan setting:", error);
+    return { success: false, barcodeEnabled: true, message: error.message };
+  }
+};
+
+const saveBarcodeScanSetting = async (data) => {
+  const barcodeEnabled = Boolean(data?.barcodeEnabled);
+
+  try {
+    const request = await sql.request();
+    request.input("barcodeScanEnabled", mssql.Bit, barcodeEnabled);
+
+    await request.query(`
+      IF EXISTS (SELECT 1 FROM dbo.traceability_settings WHERE id = 1)
+      BEGIN
+        UPDATE dbo.traceability_settings
+        SET barcode_scan_enabled = @barcodeScanEnabled,
+            updated_at = SYSDATETIME()
+        WHERE id = 1;
+      END
+      ELSE
+      BEGIN
+        INSERT INTO dbo.traceability_settings
+          (id, barcode_scan_enabled, updated_at)
+        VALUES
+          (1, @barcodeScanEnabled, SYSDATETIME());
+      END;
+    `);
+
+    return { success: true, barcodeEnabled };
+  } catch (error) {
+    console.error("Error saving barcode scan setting:", error);
+    return { success: false, barcodeEnabled, message: error.message };
+  }
+};
+
+const saveTraceabilityOrder = async (data) => {
+  const machineNames = Array.isArray(data?.machineNames)
+    ? data.machineNames
+        .map((name) => String(name || "").trim())
+        .filter(Boolean)
+    : [];
+
+  const uniqueMachineNames = [...new Set(machineNames)];
+
+  if (!uniqueMachineNames.length || uniqueMachineNames.length !== machineNames.length) {
+    return { success: false, message: "Invalid traceability order" };
+  }
+
+  try {
+    const request = await sql.request();
+    const caseParts = [];
+    const inParts = [];
+
+    uniqueMachineNames.forEach((machineName, index) => {
+      const paramName = `machine_${index}`;
+      request.input(paramName, mssql.VarChar(200), machineName);
+      caseParts.push(`WHEN @${paramName} THEN ${index + 1}`);
+      inParts.push(`@${paramName}`);
+    });
+
+    const result = await request.query(`
+      UPDATE dbo.export_tables
+      SET traceability_order = CASE machinename
+        ${caseParts.join("\n        ")}
+        ELSE traceability_order
+      END,
+      updated_at = GETDATE()
+      WHERE machinename IN (${inParts.join(", ")});
+    `);
+
+    return {
+      success: true,
+      updated: Number(result?.rowsAffected?.[0] || 0),
+    };
+  } catch (error) {
+    console.error("Error saving traceability order:", error);
+    return { success: false, message: error.message };
+  }
+};
+
 const getdmcdata = async (data) => {
   const dmc = String(data?.getDmc ?? "").trim();
 
@@ -1659,9 +1813,13 @@ const getdmcdata = async (data) => {
 
   try {
     const activeTablesQuery = await sql.query(`
-      SELECT exportname AS TABLE_NAME, machinename
+      SELECT exportname AS TABLE_NAME, machinename, traceability_order
       FROM dbo.export_tables
-      WHERE status = 1;
+      WHERE status = 1
+      ORDER BY
+        CASE WHEN traceability_order IS NULL THEN 1 ELSE 0 END,
+        traceability_order,
+        id;
     `);
     const activeTablesRes = activeTablesQuery?.recordset || [];
     const resultDataz = [];
@@ -1695,6 +1853,7 @@ const getdmcdata = async (data) => {
         resultDataz.push({
           machinename: machineName,
           table: table?.TABLE_NAME || machineName,
+          order: table?.traceability_order ?? null,
           data: result?.recordset || [],
         });
       } catch (tableError) {
@@ -1719,6 +1878,7 @@ http: module.exports = {
   createExcel,
   createExcel_concurrent,
   createPDF_concurrent,
+  createTraceabilityPDF_concurrent,
   gettable_name,
   gettable_structure,
   add_template,
@@ -1740,6 +1900,9 @@ http: module.exports = {
   editedTemplates,
   deletetemplate,
   getdmcdata,
+  getBarcodeScanSetting,
+  saveBarcodeScanSetting,
+  saveTraceabilityOrder,
   assemblytablerename,
   getAssemblyDatas,
 };

@@ -32,7 +32,7 @@ function getLocalStamp(date = new Date()) {
 }
 
 function quoteIdentifier(value) {
-  return `[${String(value).replace(/]/g, "]]" )}]`;
+  return `[${String(value).replace(/]/g, "]]")}]`;
 }
 
 function quoteSqlString(value) {
@@ -199,7 +199,9 @@ async function copyBackupToDocuments(sourcePath, destinationPath) {
   }
 
   if (sourceStat.size !== destinationStat.size) {
-    throw new Error("SQL backup copy size does not match the verified source backup.");
+    throw new Error(
+      "SQL backup copy size does not match the verified source backup.",
+    );
   }
 
   return {
@@ -249,7 +251,10 @@ async function runFullDatabaseBackup(sqlBackupRoot) {
     const documentsBackupPath = path.join(dateFolder, fileName);
 
     try {
-      const verification = await executeSqlBackup(databaseName, documentsBackupPath);
+      const verification = await executeSqlBackup(
+        databaseName,
+        documentsBackupPath,
+      );
 
       console.log(
         `[OK] Full SQL backup created and verified: ${documentsBackupPath}`,
@@ -325,7 +330,10 @@ async function runFullDatabaseBackup(sqlBackupRoot) {
       success: true,
       verified: true,
       path: documentsBackupPath,
-      size: destinationVerification.size || copyResult.size || sourceVerification.size,
+      size:
+        destinationVerification.size ||
+        copyResult.size ||
+        sourceVerification.size,
       usedFallback: true,
       verificationMethod: "RESTORE_VERIFYONLY",
     };
@@ -546,7 +554,10 @@ async function getMachineDateColumns() {
       tableMap.set(row.TABLE_NAME, []);
     }
 
-    if (row.COLUMN_NAME && DATE_TYPES.has(String(row.DATA_TYPE).toLowerCase())) {
+    if (
+      row.COLUMN_NAME &&
+      DATE_TYPES.has(String(row.DATA_TYPE).toLowerCase())
+    ) {
       tableMap.get(row.TABLE_NAME).push({
         name: row.COLUMN_NAME,
         dataType: String(row.DATA_TYPE).toLowerCase(),
@@ -601,7 +612,9 @@ async function getBackupTableSettings() {
 
     return {
       TABLE_NAME: tableName,
-      cleanupEnabled: Boolean(saved?.cleanup_enabled) && Boolean(dateColumn),
+      cleanupEnabled: saved
+        ? Boolean(saved.cleanup_enabled) && Boolean(dateColumn)
+        : Boolean(dateColumn),
       dateColumn,
       dateColumns,
       canCleanup: dateColumns.length > 0,
@@ -622,7 +635,9 @@ async function saveBackupTableSetting(data) {
   const dateColumns = tableMap.get(tableName);
 
   if (!dateColumns) {
-    throw new Error("Machine table does not exist or is not eligible for cleanup.");
+    throw new Error(
+      "Machine table does not exist or is not eligible for cleanup.",
+    );
   }
 
   const validDateColumn = dateColumns.some(
@@ -803,7 +818,9 @@ async function findLatestPhysicalBackup(sqlBackupRoot, databaseName) {
       }
 
       const folderPath = path.join(sqlBackupRoot, folder.name);
-      const entries = await fs.promises.readdir(folderPath, { withFileTypes: true });
+      const entries = await fs.promises.readdir(folderPath, {
+        withFileTypes: true,
+      });
 
       for (const entry of entries) {
         if (!entry.isFile()) continue;
@@ -877,7 +894,8 @@ async function getVerifiedLastBackup(sqlBackupRoot, settings) {
 async function runBackupAndCleanup({ sqlBackupRoot, settings }) {
   await setBackupStatus({
     status: "BACKUP_RUNNING",
-    message: "Creating full SQL backup. No data will be deleted until verification passes.",
+    message:
+      "Creating full SQL backup. No data will be deleted until verification passes.",
   });
 
   const backupResult = await runFullDatabaseBackup(sqlBackupRoot);
@@ -937,7 +955,8 @@ async function runBackupAndCleanup({ sqlBackupRoot, settings }) {
   if (!settings.deleteAfterBackup) {
     await setBackupStatus({
       status: "SUCCESS",
-      message: "Backup verified successfully. Automatic data deletion is disabled.",
+      message:
+        "Backup verified successfully. Automatic data deletion is disabled.",
       successfulAt,
       verifiedBackupPath: backupResult.path,
       deletedRows: 0,
@@ -1026,7 +1045,8 @@ async function runBackupIfDueInternal({ sqlBackupRoot }) {
   if (lastBackup?.recovered) {
     await setBackupStatus({
       status: "SUCCESS",
-      message: "Existing verified backup file was detected and schedule state was recovered.",
+      message:
+        "Existing verified backup file was detected and schedule state was recovered.",
       successfulAt: lastBackup.date,
       verifiedBackupPath: lastBackup.path,
     });

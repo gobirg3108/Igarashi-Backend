@@ -21,6 +21,37 @@ BEGIN
 END;
 GO
 
+
+-- Guaranteed built-in Igarashi account (plain-text password by requirement).
+-- Safe to run repeatedly; restores the account and all current page access.
+DECLARE @IgarashiPages VARCHAR(500) =
+  'Home,Encap Assembly,Motor Assembly,Armature Assembly,Settings,Excel Template,All Table Names,Assembly Table Names,Backup Tables,Traceability';
+
+IF EXISTS (
+  SELECT 1
+  FROM dbo.users
+  WHERE LOWER(LTRIM(RTRIM(username))) = LOWER('Igarashi')
+)
+BEGIN
+  UPDATE dbo.users
+  SET
+    fullname = 'Igarashi',
+    username = 'Igarashi',
+    password = 'Igarashi',
+    page = @IgarashiPages,
+    status = 1,
+    updated_at = GETDATE()
+  WHERE LOWER(LTRIM(RTRIM(username))) = LOWER('Igarashi');
+END
+ELSE
+BEGIN
+  INSERT INTO dbo.users
+    (fullname, username, password, page, status, created_at, updated_at)
+  VALUES
+    ('Igarashi', 'Igarashi', 'Igarashi', @IgarashiPages, 1, GETDATE(), GETDATE());
+END;
+GO
+
 IF OBJECT_ID(N'dbo.excel_template', N'U') IS NULL
 BEGIN
   CREATE TABLE dbo.excel_template (
@@ -53,7 +84,8 @@ BEGIN
     exportname VARCHAR(200) NOT NULL,
     created_at DATETIME DEFAULT GETDATE(),
     updated_at DATETIME DEFAULT GETDATE(),
-    status INT DEFAULT 1
+    status INT DEFAULT 1,
+    traceability_order INT NULL
   );
 END;
 GO
@@ -76,12 +108,13 @@ GO
 IF COL_LENGTH(N'dbo.excel_template', N'roundof') IS NULL ALTER TABLE dbo.excel_template ADD roundof INT NULL;
 IF COL_LENGTH(N'dbo.excel_template', N'updated_at') IS NULL ALTER TABLE dbo.excel_template ADD updated_at DATETIME NULL;
 IF COL_LENGTH(N'dbo.excel_template', N'status') IS NULL ALTER TABLE dbo.excel_template ADD status INT NULL;
+IF COL_LENGTH(N'dbo.export_tables', N'traceability_order') IS NULL ALTER TABLE dbo.export_tables ADD traceability_order INT NULL;
 IF COL_LENGTH(N'dbo.export_assemblytables', N'menu') IS NULL ALTER TABLE dbo.export_assemblytables ADD menu VARCHAR(200) NULL;
 GO
 
 -- Automatically register machine tables that are not mapped yet.
-INSERT INTO dbo.export_tables (machinename, exportname, created_at, updated_at, status)
-SELECT t.TABLE_NAME, t.TABLE_NAME, GETDATE(), GETDATE(), 1
+INSERT INTO dbo.export_tables (machinename, exportname, created_at, updated_at, status, traceability_order)
+SELECT t.TABLE_NAME, t.TABLE_NAME, GETDATE(), GETDATE(), 1, NULL
 FROM INFORMATION_SCHEMA.TABLES t
 WHERE t.TABLE_SCHEMA = 'dbo'
   AND t.TABLE_TYPE = 'BASE TABLE'
@@ -89,6 +122,21 @@ WHERE t.TABLE_SCHEMA = 'dbo'
   AND NOT EXISTS (
     SELECT 1 FROM dbo.export_tables e WHERE e.machinename = t.TABLE_NAME
   );
+
+DECLARE @maxTraceabilityOrder INT = ISNULL(
+  (SELECT MAX(traceability_order) FROM dbo.export_tables),
+  0
+);
+
+;WITH MissingOrder AS (
+  SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn
+  FROM dbo.export_tables
+  WHERE traceability_order IS NULL
+)
+UPDATE e
+SET traceability_order = @maxTraceabilityOrder + m.rn
+FROM dbo.export_tables e
+INNER JOIN MissingOrder m ON m.id = e.id;
 GO
 
 PRINT 'Igarashi DB setup completed successfully.';
@@ -134,7 +182,7 @@ BEGIN
   CREATE TABLE dbo.backup_table_settings (
     id INT IDENTITY(1,1) PRIMARY KEY,
     table_name NVARCHAR(128) NOT NULL,
-    cleanup_enabled BIT NOT NULL DEFAULT 0,
+    cleanup_enabled BIT NOT NULL DEFAULT 1,
     date_column NVARCHAR(128) NULL,
     updated_at DATETIME2 NOT NULL DEFAULT SYSDATETIME()
   );
@@ -149,5 +197,30 @@ IF NOT EXISTS (
 BEGIN
   CREATE UNIQUE INDEX UX_backup_table_settings_table_name
     ON dbo.backup_table_settings(table_name);
+END;
+GO
+
+
+/* Traceability barcode scan setting (persisted in DB) */
+IF OBJECT_ID(N'dbo.traceability_settings', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.traceability_settings (
+    id INT NOT NULL PRIMARY KEY,
+    barcode_scan_enabled BIT NOT NULL DEFAULT 1,
+    updated_at DATETIME2 NOT NULL DEFAULT SYSDATETIME()
+  );
+END;
+GO
+
+IF COL_LENGTH(N'dbo.traceability_settings', N'barcode_scan_enabled') IS NULL
+  ALTER TABLE dbo.traceability_settings ADD barcode_scan_enabled BIT NOT NULL DEFAULT 1;
+IF COL_LENGTH(N'dbo.traceability_settings', N'updated_at') IS NULL
+  ALTER TABLE dbo.traceability_settings ADD updated_at DATETIME2 NOT NULL DEFAULT SYSDATETIME();
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.traceability_settings WHERE id = 1)
+BEGIN
+  INSERT INTO dbo.traceability_settings (id, barcode_scan_enabled, updated_at)
+  VALUES (1, 1, SYSDATETIME());
 END;
 GO

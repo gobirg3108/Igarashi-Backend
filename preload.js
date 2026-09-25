@@ -42,6 +42,13 @@ contextBridge.exposeInMainWorld("versions", {
   editedTemplates: (data) => ipcRenderer.invoke("editedTemplates", data),
   deletetemplate: (data) => ipcRenderer.invoke("deletetemplate", data),
   getdmcdata: (data) => ipcRenderer.invoke("getdmcdata", data),
+  getBarcodeScanSetting: () => ipcRenderer.invoke("get-barcode-scan-setting"),
+  saveBarcodeScanSetting: (data) =>
+    ipcRenderer.invoke("save-barcode-scan-setting", data),
+  saveTraceabilityOrder: (data) =>
+    ipcRenderer.invoke("save-traceability-order", data),
+  exportTraceabilityPdf: (data) =>
+    ipcRenderer.invoke("export-traceability-pdf", data),
   saveTraceabilityExcel: (data) =>
     ipcRenderer.invoke("save-traceability-excel", data),
   openTraceabilityFolder: () => ipcRenderer.invoke("open-traceability-folder"),

@@ -1,4 +1,23 @@
 const { getsql } = require("./sqlConnection.js");
+const mssql = require("mssql");
+
+const DEFAULT_IGARASHI_USER = {
+  fullname: "Igarashi",
+  username: "Igarashi",
+  password: "Igarashi",
+  page: [
+    "Home",
+    "Encap Assembly",
+    "Motor Assembly",
+    "Armature Assembly",
+    "Settings",
+    "Excel Template",
+    "All Table Names",
+    "Assembly Table Names",
+    "Backup Tables",
+    "Traceability",
+  ].join(","),
+};
 
 const REQUIRED_SCHEMA = {
   users: [
@@ -37,6 +56,7 @@ const REQUIRED_SCHEMA = {
     "created_at",
     "updated_at",
     "status",
+    "traceability_order",
   ],
   export_assemblytables: [
     "id",
@@ -69,6 +89,11 @@ const REQUIRED_SCHEMA = {
     "date_column",
     "updated_at",
   ],
+  traceability_settings: [
+    "id",
+    "barcode_scan_enabled",
+    "updated_at",
+  ],
 };
 
 async function getCurrentSchema() {
@@ -83,7 +108,8 @@ async function getCurrentSchema() {
         'export_tables',
         'export_assemblytables',
         'backup_settings',
-        'backup_table_settings'
+        'backup_table_settings',
+        'traceability_settings'
       )
   `);
 
@@ -168,7 +194,8 @@ async function applySchemaMigration() {
         exportname VARCHAR(200) NOT NULL,
         created_at DATETIME NOT NULL CONSTRAINT DF_export_tables_created_at DEFAULT GETDATE(),
         updated_at DATETIME NOT NULL CONSTRAINT DF_export_tables_updated_at DEFAULT GETDATE(),
-        status INT NOT NULL CONSTRAINT DF_export_tables_status DEFAULT 1
+        status INT NOT NULL CONSTRAINT DF_export_tables_status DEFAULT 1,
+        traceability_order INT NULL
       );
     END;
   `);
@@ -227,11 +254,12 @@ async function applySchemaMigration() {
       CREATE TABLE dbo.backup_table_settings (
         id INT IDENTITY(1,1) PRIMARY KEY,
         table_name NVARCHAR(128) NOT NULL,
-        cleanup_enabled BIT NOT NULL CONSTRAINT DF_backup_table_cleanup DEFAULT 0,
+        cleanup_enabled BIT NOT NULL CONSTRAINT DF_backup_table_cleanup DEFAULT 1,
         date_column NVARCHAR(128) NULL,
         updated_at DATETIME2 NOT NULL CONSTRAINT DF_backup_table_updated DEFAULT SYSDATETIME()
       );
     END;
+
 
     IF OBJECT_ID(N'dbo.backup_table_settings', N'U') IS NOT NULL
        AND NOT EXISTS (
@@ -242,6 +270,23 @@ async function applySchemaMigration() {
     BEGIN
       CREATE UNIQUE INDEX UX_backup_table_settings_table_name
       ON dbo.backup_table_settings(table_name);
+    END;
+  `);
+
+  await sql.query(`
+    IF OBJECT_ID(N'dbo.traceability_settings', N'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.traceability_settings (
+        id INT NOT NULL PRIMARY KEY,
+        barcode_scan_enabled BIT NOT NULL CONSTRAINT DF_traceability_barcode_enabled DEFAULT 1,
+        updated_at DATETIME2 NOT NULL CONSTRAINT DF_traceability_settings_updated DEFAULT SYSDATETIME()
+      );
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.traceability_settings WHERE id = 1)
+    BEGIN
+      INSERT INTO dbo.traceability_settings (id, barcode_scan_enabled, updated_at)
+      VALUES (1, 1, SYSDATETIME());
     END;
   `);
 
@@ -289,6 +334,7 @@ async function applySchemaMigration() {
     ["export_tables", "created_at", "DATETIME NULL"],
     ["export_tables", "updated_at", "DATETIME NULL"],
     ["export_tables", "status", "INT NULL"],
+    ["export_tables", "traceability_order", "INT NULL"],
 
     ["export_assemblytables", "machinename", "VARCHAR(200) NULL"],
     ["export_assemblytables", "exportname", "VARCHAR(200) NULL"],
@@ -338,13 +384,24 @@ async function applySchemaMigration() {
     [
       "backup_table_settings",
       "cleanup_enabled",
-      "BIT NOT NULL CONSTRAINT DF_backup_table_cleanup_mig DEFAULT 0",
+      "BIT NOT NULL CONSTRAINT DF_backup_table_cleanup_mig DEFAULT 1",
     ],
     ["backup_table_settings", "date_column", "NVARCHAR(128) NULL"],
     [
       "backup_table_settings",
       "updated_at",
       "DATETIME2 NOT NULL CONSTRAINT DF_backup_table_updated_mig DEFAULT SYSDATETIME()",
+    ],
+
+    [
+      "traceability_settings",
+      "barcode_scan_enabled",
+      "BIT NOT NULL CONSTRAINT DF_traceability_barcode_enabled_mig DEFAULT 1",
+    ],
+    [
+      "traceability_settings",
+      "updated_at",
+      "DATETIME2 NOT NULL CONSTRAINT DF_traceability_settings_updated_mig DEFAULT SYSDATETIME()",
     ],
   ];
 
@@ -372,6 +429,13 @@ async function applySchemaMigration() {
       );
     END;
 
+    IF OBJECT_ID(N'dbo.traceability_settings', N'U') IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM dbo.traceability_settings WHERE id = 1)
+    BEGIN
+      INSERT INTO dbo.traceability_settings (id, barcode_scan_enabled, updated_at)
+      VALUES (1, 1, SYSDATETIME());
+    END;
+
     IF OBJECT_ID(N'dbo.backup_table_settings', N'U') IS NOT NULL
        AND NOT EXISTS (
          SELECT 1 FROM sys.indexes
@@ -387,6 +451,44 @@ async function applySchemaMigration() {
     BEGIN
       CREATE UNIQUE INDEX UX_backup_table_settings_table_name
       ON dbo.backup_table_settings(table_name);
+    END;
+  `);
+}
+
+async function ensureDefaultIgarashiUser() {
+  const sql = getsql();
+  const request = await sql.request();
+
+  request.input("fullname", mssql.VarChar(100), DEFAULT_IGARASHI_USER.fullname);
+  request.input("username", mssql.VarChar(100), DEFAULT_IGARASHI_USER.username);
+  request.input("password", mssql.VarChar(200), DEFAULT_IGARASHI_USER.password);
+  request.input("page", mssql.VarChar(500), DEFAULT_IGARASHI_USER.page);
+
+  // Guarantee the built-in account at startup. If an older hashed Igarashi
+  // account exists, it is normalized to the requested plain-text credentials.
+  await request.query(`
+    IF EXISTS (
+      SELECT 1
+      FROM dbo.users
+      WHERE LOWER(LTRIM(RTRIM(username))) = LOWER(@username)
+    )
+    BEGIN
+      UPDATE dbo.users
+      SET
+        fullname = @fullname,
+        username = @username,
+        password = @password,
+        page = @page,
+        status = 1,
+        updated_at = GETDATE()
+      WHERE LOWER(LTRIM(RTRIM(username))) = LOWER(@username);
+    END
+    ELSE
+    BEGIN
+      INSERT INTO dbo.users
+        (fullname, username, password, page, status, created_at, updated_at)
+      VALUES
+        (@fullname, @username, @password, @page, 1, GETDATE(), GETDATE());
     END;
   `);
 }
@@ -411,6 +513,33 @@ async function syncMachineTables() {
         FROM dbo.export_tables e
         WHERE e.machinename = t.TABLE_NAME
       );
+  `);
+}
+
+async function ensureTraceabilityOrder() {
+  const sql = getsql();
+
+  await sql.query(`
+    IF OBJECT_ID(N'dbo.export_tables', N'U') IS NOT NULL
+       AND COL_LENGTH(N'dbo.export_tables', N'traceability_order') IS NOT NULL
+    BEGIN
+      DECLARE @maxTraceabilityOrder INT = ISNULL(
+        (SELECT MAX(traceability_order) FROM dbo.export_tables),
+        0
+      );
+
+      ;WITH MissingOrder AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (ORDER BY id) AS rn
+        FROM dbo.export_tables
+        WHERE traceability_order IS NULL
+      )
+      UPDATE e
+      SET traceability_order = @maxTraceabilityOrder + m.rn
+      FROM dbo.export_tables e
+      INNER JOIN MissingOrder m ON m.id = e.id;
+    END;
   `);
 }
 
@@ -442,8 +571,13 @@ async function ensureAppSchema() {
     console.log(" Database support schema verified");
   }
 
+  await ensureDefaultIgarashiUser();
+  console.log(" Default Igarashi user verified (all page access)");
+
   await syncMachineTables();
+  await ensureTraceabilityOrder();
   console.log(" Machine table mapping synchronized");
+  console.log(" Traceability display order verified");
 }
 
 module.exports = { ensureAppSchema };

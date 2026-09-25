@@ -44,6 +44,7 @@ const {
   getdata,
   createExcel_concurrent,
   createPDF_concurrent,
+  createTraceabilityPDF_concurrent,
   gettable_name,
   gettable_structure,
   add_template,
@@ -63,6 +64,9 @@ const {
   deletetemplate,
   editedTemplates,
   getdmcdata,
+  getBarcodeScanSetting,
+  saveBarcodeScanSetting,
+  saveTraceabilityOrder,
   assemblytablerename,
   getAssemblytablename,
   checkexistassemblytable,
@@ -287,6 +291,35 @@ app.whenReady().then(async () => {
   ipcMain.handle("getdmcdata", async (event, data) => {
     const res = await getdmcdata(data);
     return res;
+  });
+
+  ipcMain.handle("get-barcode-scan-setting", async () => {
+    return await getBarcodeScanSetting();
+  });
+
+  ipcMain.handle("save-barcode-scan-setting", async (event, data) => {
+    return await saveBarcodeScanSetting(data);
+  });
+
+
+  ipcMain.handle("save-traceability-order", async (event, data) => {
+    return await saveTraceabilityOrder(data);
+  });
+
+  ipcMain.handle("export-traceability-pdf", async (event, data) => {
+    try {
+      const { traceabilityRoot } = ensureOutputFolders();
+      return await createTraceabilityPDF_concurrent({
+        ...data,
+        traceabilityRoot,
+      });
+    } catch (error) {
+      console.error("Traceability PDF export failed:", error);
+      return {
+        success: false,
+        message: error?.message || "Traceability PDF export failed",
+      };
+    }
   });
 
   ipcMain.handle(
