@@ -762,7 +762,14 @@ const createPDF_concurrent = async (data, js) => {
 
     worker.postMessage({
       result: formattedData,
-      data,
+      data: {
+        ...data,
+        logoPath: path.join(
+          __dirname,
+          "html",
+          "igarashi-removebg-preview.png",
+        ),
+      },
       styledHeaders: styledHeaders.length ? styledHeaders : null,
     });
   });
@@ -841,20 +848,19 @@ const createTraceabilityPDF_concurrent = async (data) => {
   });
 };
 
-const gettable_name = async (params) => {
-  const result = await sql.query(`SELECT TABLE_NAME 
-FROM INFORMATION_SCHEMA.TABLES 
-WHERE TABLE_TYPE = 'BASE TABLE';
-`);
+const gettable_name = async () => {
+  // All physical dbo tables are intentionally returned here.
+  // The admin decides which ones are exposed to the normal UI using
+  // export_tables.status (Visibility ON/OFF) from the All Table Names page.
+  const result = await sql.query(`
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = 'dbo'
+      AND TABLE_TYPE = 'BASE TABLE'
+    ORDER BY TABLE_NAME;
+  `);
 
-  return result?.recordset?.length
-    ? result?.recordset?.filter(
-        (item) =>
-          item?.TABLE_NAME?.startsWith("DXP") ||
-          item?.TABLE_NAME?.startsWith("MD") ||
-          item?.TABLE_NAME?.startsWith("MES"),
-      )
-    : [];
+  return result?.recordset || [];
 };
 
 const gettable_structure = async (params) => {
@@ -1288,8 +1294,8 @@ const tablerename = async (data) => {
           @newName,
           GETDATE(),
           GETDATE(),
-          1,
-          ISNULL((SELECT MAX(traceability_order) + 1 FROM export_tables), 1)
+          0,
+          NULL
         )
       `);
 

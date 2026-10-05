@@ -78,21 +78,14 @@ const gettable_name = async () => {
   const sqlObj = getsql();
 
   const result = await sqlObj.query(`
-    SELECT TABLE_NAME 
-    FROM INFORMATION_SCHEMA.TABLES 
-    WHERE TABLE_TYPE = 'BASE TABLE'
+    SELECT TABLE_NAME
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = 'dbo'
+      AND TABLE_TYPE = 'BASE TABLE'
+    ORDER BY TABLE_NAME
   `);
 
-  console.log("resultzzzz...!", result);
-
-  return result?.recordset?.length
-    ? result.recordset.filter(
-        (item) =>
-          item?.TABLE_NAME?.startsWith("DXP") ||
-          item?.TABLE_NAME?.startsWith("MD") ||
-          item?.TABLE_NAME?.startsWith("MES"),
-      )
-    : [];
+  return result?.recordset || [];
 };
 
 module.exports = { getsql, connectDB, find_table };

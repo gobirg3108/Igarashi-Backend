@@ -495,19 +495,15 @@ async function ensureDefaultIgarashiUser() {
 
 async function syncMachineTables() {
   const sql = getsql();
-  // Add newly discovered machine tables to the main machine mapping automatically.
-  // Existing rename/status settings are never overwritten.
+  // Register every physical dbo table so the admin can see the complete
+  // IGARASHI_DB table list. Newly discovered tables are OFF by default;
+  // existing rename/status choices are never overwritten.
   await sql.query(`
-    INSERT INTO dbo.export_tables (machinename, exportname, created_at, updated_at, status)
-    SELECT t.TABLE_NAME, t.TABLE_NAME, GETDATE(), GETDATE(), 1
+    INSERT INTO dbo.export_tables (machinename, exportname, created_at, updated_at, status, traceability_order)
+    SELECT t.TABLE_NAME, t.TABLE_NAME, GETDATE(), GETDATE(), 0, NULL
     FROM INFORMATION_SCHEMA.TABLES t
     WHERE t.TABLE_SCHEMA = 'dbo'
       AND t.TABLE_TYPE = 'BASE TABLE'
-      AND (
-        t.TABLE_NAME LIKE 'DXP%'
-        OR t.TABLE_NAME LIKE 'MD%'
-        OR t.TABLE_NAME LIKE 'MES%'
-      )
       AND NOT EXISTS (
         SELECT 1
         FROM dbo.export_tables e
@@ -576,7 +572,7 @@ async function ensureAppSchema() {
 
   await syncMachineTables();
   await ensureTraceabilityOrder();
-  console.log(" Machine table mapping synchronized");
+  console.log(" All dbo table mappings synchronized (new tables default OFF)");
   console.log(" Traceability display order verified");
 }
 

@@ -1,286 +1,523 @@
-// pdf_worker.js - Complete worker with Date/Time mapping and styling
-
 const fs = require("fs");
-const PDFDocument = require("pdfkit");
 const path = require("path");
 const os = require("os");
+const PDFDocument = require("pdfkit");
 const { parentPort } = require("worker_threads");
 
-const getLocalDateFolderName = (date = new Date()) => {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
+const pad = (value) => String(value).padStart(2, "0");
 
-// --------------------------------------------------
-// DATE FIX FUNCTION - NO TIMEZONE CONVERSION
-// --------------------------------------------------
-const formatDateTime = (value) => {
-  if (!value) {
+const getLocalDateFolderName = (date = new Date()) =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+const formatGeneratedAt = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-IN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(date);
+
+const splitDateTime = (value) => {
+  if (value === null || value === undefined || value === "") {
     return { date: "", time: "" };
   }
 
-  let str = "";
-
-  if (value instanceof Date) {
-    str = value.toISOString();
-  } else {
-    str = String(value).trim();
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return {
+      date: `${pad(value.getDate())}-${pad(value.getMonth() + 1)}-${value.getFullYear()}`,
+      time: `${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`,
+    };
   }
 
-  // Remove UTC "Z" marker to avoid timezone shift
-  str = str.replace("Z", "");
+  const raw = String(value).trim().replace(/Z$/, "");
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}:\d{2}:\d{2})/);
 
-  const dateStr = str.substring(0, 10); // "2026-04-17"
-  const timeStr = str.substring(11, 19); // "08:05:00"
-
-  if (
-    /^\d{4}-\d{2}-\d{2}$/.test(dateStr) &&
-    /^\d{2}:\d{2}:\d{2}$/.test(timeStr)
-  ) {
-    return { date: dateStr, time: timeStr };
+  if (match) {
+    return { date: `${match[3]}-${match[2]}-${match[1]}`, time: match[4] };
   }
 
-  return { date: "", time: "" };
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    return { date: `${dateOnly[3]}-${dateOnly[2]}-${dateOnly[1]}`, time: "" };
+  }
+
+  return { date: raw, time: "" };
 };
 
-// --------------------------------------------------
-// MAIN PDF WITH STYLING
-// --------------------------------------------------
-const createPDF = async (data, result, styledHeaders) => {
-  if (!result?.length) return "No data to export";
+const formatDateInput = (value) => {
+  if (!value) return "";
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : raw;
+};
 
-  const fallbackRoot = path.join(
-    os.homedir(),
-    "Documents",
-    "Igarashi",
-    "Backup",
-  );
+const formatValue = (value) => {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const dt = splitDateTime(value);
+    return `${dt.date} ${dt.time}`.trim();
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value).trim();
+};
+
+const friendlyHeader = (header) => String(header || "").replace(/_/g, " ");
+
+const buildHeaders = (row, styledHeaders) => {
+  const result = [];
+
+  if (Array.isArray(styledHeaders) && styledHeaders.length) {
+    styledHeaders.forEach((header) => {
+      const type = String(header?.type || "NORMAL").toUpperCase();
+      const base = {
+        key: header?.original,
+        label: header?.label || friendlyHeader(header?.original),
+        type: type.toLowerCase(),
+      };
+
+      if (type === "DATETIME") {
+        result.push({ ...base, label: "Date", type: "date" });
+        result.push({ ...base, label: "Time", type: "time" });
+      } else {
+        result.push(base);
+      }
+    });
+
+    return result;
+  }
+
+  Object.keys(row || {}).forEach((key) => {
+    if (String(key).toLowerCase() === "date_time") {
+      result.push({ key, label: "Date", type: "date" });
+      result.push({ key, label: "Time", type: "time" });
+    } else {
+      result.push({ key, label: friendlyHeader(key), type: "normal" });
+    }
+  });
+
+  return result;
+};
+
+const getHeaderValue = (row, header) => {
+  const value = row?.[header.key];
+  if (header.type === "date" || header.type === "time") {
+    const dt = splitDateTime(value);
+    return header.type === "date" ? dt.date : dt.time;
+  }
+  return formatValue(value);
+};
+
+const safeFilePart = (value) =>
+  String(value || "REPORT")
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 80);
+
+const createPDF = async (data, result, styledHeaders) => {
+  if (!Array.isArray(result) || !result.length) return "No data to export";
+
+  const orientation =
+    String(data?.orientation || "landscape").toLowerCase() === "portrait"
+      ? "portrait"
+      : "landscape";
+
+  const fallbackRoot = path.join(os.homedir(), "Documents", "Igarashi", "Backup");
   const backupRoot =
     typeof data?.outputRoot === "string" && data.outputRoot.trim()
       ? path.resolve(data.outputRoot)
       : fallbackRoot;
-  const todayFolder = getLocalDateFolderName();
-  const backupFolder = path.join(backupRoot, todayFolder, "DOWNLOAD");
+  const backupFolder = path.join(backupRoot, getLocalDateFolderName(), "DOWNLOAD");
+  fs.mkdirSync(backupFolder, { recursive: true });
 
-  if (!fs.existsSync(backupFolder)) {
-    fs.mkdirSync(backupFolder, { recursive: true });
-  }
-
-  const fileName = `${data.machine.slice(0, 25)}_${Date.now()}.pdf`;
+  const fileName = `${safeFilePart(data?.machine)}_${orientation}_${Date.now()}.pdf`;
   const filePath = path.join(backupFolder, fileName);
 
+  const PAGE_MARGIN = 20;
+  const FOOTER_RESERVED = 42;
+  const HEADER_BLUE = "#1976D2";
+  const BORDER = "#C9D2DC";
+  const LIGHT_ROW = "#F7F9FC";
+  const generatedAt = formatGeneratedAt();
+  const headers = buildHeaders(result[0], styledHeaders);
+
+  if (!headers.length) throw new Error("No columns available for PDF export");
+
+  const reportType = String(data?.reportType || "MACHINE DATA").trim();
+  const machineName = String(data?.machine || "Machine").trim();
+  const shiftName = String(data?.shift || "All").trim();
+  const fromDate = formatDateInput(data?.fromDate);
+  const toDate = formatDateInput(data?.toDate);
+  const fromTime = String(data?.from_time || "").trim();
+  const toTime = String(data?.to_time || "").trim();
+  const templateName = String(data?.getSelTemplate || "").trim();
+
   const doc = new PDFDocument({
-    margin: 15,
     size: "A4",
-    layout: "landscape",
+    layout: orientation,
+    margins: {
+      top: PAGE_MARGIN,
+      bottom: PAGE_MARGIN,
+      left: PAGE_MARGIN,
+      right: PAGE_MARGIN,
+    },
+    autoFirstPage: false,
+    bufferPages: true,
+    info: {
+      Title: `${machineName} Report`,
+      Author: "Igarashi Motors India Ltd.",
+      Subject: `${reportType} Report`,
+    },
   });
 
   const stream = fs.createWriteStream(filePath);
   doc.pipe(stream);
 
-  // --------------------------------------------------
-  // BUILD HEADERS
-  // --------------------------------------------------
-  let headers = [];
+  let currentY = 0;
+  let currentSectionTitle = machineName;
 
-  if (styledHeaders && styledHeaders.length) {
-    // --------------------------------------------------
-    // TEMPLATE MODE:
-    // Expand DATETIME type into two rows (Date + Time).
-    // DATE and TIME types from api.js pass through as-is.
-    // --------------------------------------------------
-    styledHeaders.forEach((h) => {
-      if (h.type === "DATETIME") {
-        // Split into Date row
-        headers.push({ ...h, label: "Date", type: "DATE" });
-        // Split into Time row
-        headers.push({ ...h, label: "Time", type: "TIME" });
-      } else {
-        // DATE, TIME, NORMAL — already correctly mapped in api.js
-        headers.push(h);
+  const pageUsableWidth = () =>
+    doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const contentBottom = () => doc.page.height - FOOTER_RESERVED;
+
+  const drawReportHeader = () => {
+    const left = doc.page.margins.left;
+    const width = pageUsableWidth();
+    const topY = doc.page.margins.top;
+
+    if (data?.logoPath && fs.existsSync(data.logoPath)) {
+      try {
+        doc.image(data.logoPath, left, topY, { fit: [88, 34] });
+      } catch (error) {
+        console.warn("PDF logo skipped:", error.message);
       }
-    });
-  } else {
-    // --------------------------------------------------
-    // NO TEMPLATE MODE: original fallback logic (unchanged)
-    // --------------------------------------------------
-    let dbHeaders = Object.keys(result[0]);
-    const hasDateTime = dbHeaders.some((x) => x.toLowerCase() === "date_time");
-
-    if (hasDateTime) {
-      const dateTimeKey = dbHeaders.find(
-        (x) => x.toLowerCase() === "date_time"
-      );
-
-      headers.push({
-        original: dateTimeKey,
-        label: "Date",
-        header_bg: "#ffffff",
-        header_text: "#000000",
-        content_bg: "#ffffff",
-        content_text: "#000000",
-        type: "DATE",
-      });
-
-      headers.push({
-        original: dateTimeKey,
-        label: "Time",
-        header_bg: "#ffffff",
-        header_text: "#000000",
-        content_bg: "#ffffff",
-        content_text: "#000000",
-        type: "TIME",
-      });
-
-      dbHeaders = dbHeaders.filter((x) => x.toLowerCase() !== "date_time");
     }
 
-    dbHeaders.forEach((col) => {
-      headers.push({
-        original: col,
-        label: col,
-        header_bg: "#ffffff",
-        header_text: "#000000",
-        content_bg: "#ffffff",
-        content_text: "#000000",
-        type: "NORMAL",
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(orientation === "landscape" ? 14 : 13)
+      .fillColor("#111111")
+      .text("IGARASHI MOTORS INDIA LTD.", left + 100, topY + 2, {
+        width: Math.max(100, width - 200),
+        align: "center",
       });
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .text(`${reportType.toUpperCase()} REPORT`, left + 100, topY + 21, {
+        width: Math.max(100, width - 200),
+        align: "center",
+      });
+
+    const detailWidth = width / 2 - 5;
+    doc.font("Helvetica").fontSize(8).fillColor("#333333");
+    doc.text(`Machine: ${machineName}`, left, topY + 45, { width: detailWidth });
+    doc.text(`Generated: ${generatedAt}`, left + width / 2, topY + 45, {
+      width: detailWidth,
+      align: "right",
     });
-  }
+    doc.text(`Date: ${fromDate}${toDate && toDate !== fromDate ? ` to ${toDate}` : ""}`, left, topY + 58, {
+      width: detailWidth,
+    });
+    doc.text(`Shift: ${shiftName}`, left + width / 2, topY + 58, {
+      width: detailWidth,
+      align: "right",
+    });
+    doc.text(`Time: ${fromTime || "--:--"} to ${toTime || "--:--"}`, left, topY + 71, {
+      width: detailWidth,
+    });
+    doc.text(`Orientation: ${orientation === "portrait" ? "Portrait" : "Landscape"}`, left + width / 2, topY + 71, {
+      width: detailWidth,
+      align: "right",
+    });
 
-  // --------------------------------------------------
-  // COLUMN SPLIT (MAX 8 COLUMNS PER PAGE)
-  // --------------------------------------------------
-  const MAX_COLS = 8;
-  const chunks = [];
+    if (templateName && templateName !== "select" && templateName !== "No-Template") {
+      doc.text(`Template: ${templateName}`, left, topY + 84, { width });
+    }
 
-  for (let i = 0; i < headers.length; i += MAX_COLS) {
-    chunks.push(headers.slice(i, i + MAX_COLS));
-  }
+    const lineY = topY + (templateName && templateName !== "select" && templateName !== "No-Template" ? 100 : 88);
+    doc
+      .moveTo(left, lineY)
+      .lineTo(doc.page.width - doc.page.margins.right, lineY)
+      .strokeColor("#777777")
+      .lineWidth(0.7)
+      .stroke();
 
-  // --------------------------------------------------
-  // TITLE
-  // --------------------------------------------------
-  doc.font("Helvetica-Bold").fontSize(18).text(`${data.machine} Report`, {
-    align: "center",
-  });
+    return lineY + 10;
+  };
 
-  doc.moveDown(1.5);
+  const drawSectionTitle = (title, continued = false) => {
+    const left = doc.page.margins.left;
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(orientation === "landscape" ? 11 : 10.5)
+      .fillColor("#111111")
+      .text(`${title}${continued ? " (continued)" : ""}`, left, currentY, {
+        width: pageUsableWidth(),
+      });
+    currentY += 18;
+  };
 
-  // --------------------------------------------------
-  // RENDER PAGES WITH STYLING
-  // --------------------------------------------------
-  chunks.forEach((chunk, pageIndex) => {
-    if (pageIndex !== 0) doc.addPage();
+  const newPage = (continued = false) => {
+    doc.addPage();
+    currentY = drawReportHeader();
+    drawSectionTitle(currentSectionTitle, continued);
+  };
 
-    let y = doc.y;
-    const usableWidth = doc.page.width - 30;
-    const colWidth = usableWidth / chunk.length;
-    const cellHeight = 20;
-    const borderColor = "#cccccc";
+  const ensureSpace = (heightNeeded) => {
+    if (currentY + heightNeeded <= contentBottom()) return false;
+    newPage(true);
+    return true;
+  };
 
-    // HEADER ROW
-    chunk.forEach((h, i) => {
-      const x = 15 + i * colWidth;
+  const calculateLandscapeRowHeight = (chunkHeaders, row, colWidth) => {
+    const innerWidth = Math.max(10, colWidth - 6);
+    doc.font("Helvetica").fontSize(6.5);
+    let height = 20;
 
-      doc.rect(x, y, colWidth, cellHeight);
-      doc.fillColor(h.header_bg).fill();
-      doc.strokeColor(borderColor).lineWidth(0.5).stroke();
+    chunkHeaders.forEach((header) => {
+      const value = getHeaderValue(row, header);
+      const textHeight = doc.heightOfString(String(value ?? ""), {
+        width: innerWidth,
+      });
+      height = Math.max(height, Math.min(38, textHeight + 7));
+    });
 
+    return height;
+  };
+
+  const drawLandscapeHeader = (chunkHeaders) => {
+    const left = doc.page.margins.left;
+    const colWidth = pageUsableWidth() / chunkHeaders.length;
+    const height = 24;
+
+    chunkHeaders.forEach((header, index) => {
+      const x = left + index * colWidth;
+      doc.rect(x, currentY, colWidth, height).fillAndStroke(HEADER_BLUE, BORDER);
       doc
         .font("Helvetica-Bold")
-        .fontSize(10)
-        .fillColor(h.header_text)
-        .text(h.label, x + 5, y + 5, {
-          width: colWidth - 10,
-          height: cellHeight - 10,
-          align: "left",
-          valign: "center",
+        .fontSize(6.6)
+        .fillColor("#FFFFFF")
+        .text(header.label, x + 3, currentY + 5, {
+          width: colWidth - 6,
+          height: height - 7,
+          ellipsis: true,
         });
     });
 
-    y += cellHeight;
+    currentY += height;
+    return colWidth;
+  };
 
-    // DATA ROWS
-    doc.font("Helvetica").fontSize(9);
+  const drawLandscapeRow = (chunkHeaders, row, colWidth, rowIndex, rowHeight) => {
+    const left = doc.page.margins.left;
+    const fill = rowIndex % 2 === 0 ? "#FFFFFF" : LIGHT_ROW;
 
-    result.forEach((row) => {
-      if (y > doc.page.height - 40) {
-        doc.addPage();
-        y = 30;
-
-        // Redraw header on new page
-        chunk.forEach((h, i) => {
-          const x = 15 + i * colWidth;
-
-          doc.rect(x, y, colWidth, cellHeight);
-          doc.fillColor(h.header_bg).fill();
-          doc.strokeColor(borderColor).lineWidth(0.5).stroke();
-
-          doc
-            .font("Helvetica-Bold")
-            .fontSize(10)
-            .fillColor(h.header_text)
-            .text(h.label, x + 5, y + 5, {
-              width: colWidth - 10,
-              height: cellHeight - 10,
-              align: "left",
-              valign: "center",
-            });
+    chunkHeaders.forEach((header, index) => {
+      const x = left + index * colWidth;
+      const value = getHeaderValue(row, header);
+      doc.rect(x, currentY, colWidth, rowHeight).fillAndStroke(fill, BORDER);
+      doc
+        .font("Helvetica")
+        .fontSize(6.5)
+        .fillColor("#111111")
+        .text(String(value ?? ""), x + 3, currentY + 4, {
+          width: colWidth - 6,
+          height: rowHeight - 6,
+          ellipsis: true,
         });
+    });
 
-        y += cellHeight;
-        doc.font("Helvetica").fontSize(9);
-      }
+    currentY += rowHeight;
+  };
 
-      chunk.forEach((h, i) => {
-        const x = 15 + i * colWidth;
-        let value = row[h.original];
+  const renderLandscape = () => {
+    const MAX_COLS = 8;
+    const chunks = [];
+    for (let index = 0; index < headers.length; index += MAX_COLS) {
+      chunks.push(headers.slice(index, index + MAX_COLS));
+    }
 
-        // --------------------------------------------------
-        // DATE / TIME SPLIT — works for both template & no-template
-        // --------------------------------------------------
-        if (h.type === "DATE" || h.type === "TIME") {
-          const dt = formatDateTime(value);
-          value = h.type === "DATE" ? dt.date : dt.time;
-        }
+    newPage(false);
 
-        doc.rect(x, y, colWidth, cellHeight);
-        doc.fillColor(h.content_bg).fill();
-        doc.strokeColor(borderColor).lineWidth(0.5).stroke();
+    chunks.forEach((chunkHeaders, chunkIndex) => {
+      if (chunkIndex > 0) currentY += 7;
 
-        doc
-          .fillColor(h.content_text)
-          .text(String(value ?? ""), x + 5, y + 5, {
-            width: colWidth - 10,
-            height: cellHeight - 10,
-            align: "left",
-            valign: "center",
-          });
+      const firstRowHeight = calculateLandscapeRowHeight(
+        chunkHeaders,
+        result[0],
+        pageUsableWidth() / chunkHeaders.length,
+      );
+      ensureSpace(24 + firstRowHeight + 4);
+      let colWidth = drawLandscapeHeader(chunkHeaders);
+
+      result.forEach((row, rowIndex) => {
+        const rowHeight = calculateLandscapeRowHeight(chunkHeaders, row, colWidth);
+        const pageChanged = ensureSpace(rowHeight + 2);
+        if (pageChanged) colWidth = drawLandscapeHeader(chunkHeaders);
+        drawLandscapeRow(chunkHeaders, row, colWidth, rowIndex, rowHeight);
+      });
+    });
+  };
+
+  const drawPortraitTableHeader = () => {
+    const left = doc.page.margins.left;
+    const width = pageUsableWidth();
+    const parameterWidth = Math.round(width * 0.46);
+    const valueWidth = width - parameterWidth;
+    const height = 22;
+
+    doc.rect(left, currentY, parameterWidth, height).fillAndStroke(HEADER_BLUE, BORDER);
+    doc.rect(left + parameterWidth, currentY, valueWidth, height).fillAndStroke(HEADER_BLUE, BORDER);
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(7.5)
+      .fillColor("#FFFFFF")
+      .text("Parameter", left + 4, currentY + 6, { width: parameterWidth - 8 })
+      .text("Value", left + parameterWidth + 4, currentY + 6, { width: valueWidth - 8 });
+
+    currentY += height;
+    return { parameterWidth, valueWidth };
+  };
+
+  const calculatePortraitRowHeight = (label, value, parameterWidth, valueWidth) => {
+    doc.font("Helvetica").fontSize(7.5);
+    const labelHeight = doc.heightOfString(label, { width: parameterWidth - 8 });
+    const valueHeight = doc.heightOfString(String(value ?? ""), { width: valueWidth - 8 });
+    return Math.max(19, Math.min(46, Math.max(labelHeight, valueHeight) + 8));
+  };
+
+  const drawPortraitRow = (label, value, parameterWidth, valueWidth, rowIndex, rowHeight) => {
+    const left = doc.page.margins.left;
+    const fill = rowIndex % 2 === 0 ? "#FFFFFF" : LIGHT_ROW;
+    const isFinalResult = String(label).toLowerCase() === "final result";
+    const valueText = String(value ?? "");
+    const resultOk = isFinalResult && valueText.toUpperCase() === "OK";
+
+    doc.rect(left, currentY, parameterWidth, rowHeight).fillAndStroke(fill, BORDER);
+    doc
+      .rect(left + parameterWidth, currentY, valueWidth, rowHeight)
+      .fillAndStroke(resultOk ? "#E9F7EF" : fill, BORDER);
+
+    doc
+      .font(isFinalResult ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(7.5)
+      .fillColor("#111111")
+      .text(label, left + 4, currentY + 5, {
+        width: parameterWidth - 8,
+        height: rowHeight - 7,
+      })
+      .text(valueText, left + parameterWidth + 4, currentY + 5, {
+        width: valueWidth - 8,
+        height: rowHeight - 7,
       });
 
-      y += cellHeight;
+    currentY += rowHeight;
+  };
+
+  const renderPortrait = () => {
+    newPage(false);
+
+    result.forEach((row, recordIndex) => {
+      if (result.length > 1) {
+        ensureSpace(18 + 22 + 20);
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(8.5)
+          .fillColor("#333333")
+          .text(`Record ${recordIndex + 1}`, doc.page.margins.left, currentY, {
+            width: pageUsableWidth(),
+          });
+        currentY += 16;
+      }
+
+      ensureSpace(22 + 20);
+      let widths = drawPortraitTableHeader();
+
+      headers.forEach((header, headerIndex) => {
+        const label = header.label;
+        const value = getHeaderValue(row, header);
+        const rowHeight = calculatePortraitRowHeight(
+          label,
+          value,
+          widths.parameterWidth,
+          widths.valueWidth,
+        );
+
+        const pageChanged = ensureSpace(rowHeight + 2);
+        if (pageChanged) {
+          if (result.length > 1) {
+            doc
+              .font("Helvetica-Bold")
+              .fontSize(8)
+              .fillColor("#555555")
+              .text(`Record ${recordIndex + 1} (continued)`, doc.page.margins.left, currentY, {
+                width: pageUsableWidth(),
+              });
+            currentY += 15;
+          }
+          widths = drawPortraitTableHeader();
+        }
+
+        drawPortraitRow(
+          label,
+          value,
+          widths.parameterWidth,
+          widths.valueWidth,
+          headerIndex,
+          rowHeight,
+        );
+      });
+
+      currentY += 10;
     });
-  });
+  };
+
+  if (orientation === "portrait") renderPortrait();
+  else renderLandscape();
+
+  const range = doc.bufferedPageRange();
+  for (let pageIndex = range.start; pageIndex < range.start + range.count; pageIndex += 1) {
+    doc.switchToPage(pageIndex);
+    const footerY = doc.page.height - 31;
+    doc
+      .font("Helvetica")
+      .fontSize(7)
+      .fillColor("#555555")
+      .text(`Page ${pageIndex - range.start + 1} of ${range.count}`, doc.page.margins.left, footerY, {
+        width: pageUsableWidth(),
+        align: "right",
+        lineBreak: false,
+      });
+  }
 
   doc.end();
 
   await new Promise((resolve, reject) => {
-    stream.on("finish", resolve);
-    stream.on("error", reject);
+    stream.once("finish", resolve);
+    stream.once("error", reject);
   });
+
+  const stats = fs.statSync(filePath);
+  if (!stats.isFile() || stats.size <= 0) throw new Error("PDF file was not created correctly");
 
   return filePath;
 };
 
-// --------------------------------------------------
-// WORKER MESSAGE HANDLER
-// --------------------------------------------------
 parentPort.on("message", async ({ data, result, styledHeaders }) => {
   try {
-    const filePath = await createPDF(data, result, styledHeaders);
+    const filePath = await createPDF(data || {}, result || [], styledHeaders || null);
     parentPort.postMessage(filePath);
   } catch (error) {
-    parentPort.postMessage(error.message);
+    parentPort.postMessage(error?.message || "PDF export failed");
   }
 });

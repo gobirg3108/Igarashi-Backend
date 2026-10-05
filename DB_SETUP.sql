@@ -112,13 +112,14 @@ IF COL_LENGTH(N'dbo.export_tables', N'traceability_order') IS NULL ALTER TABLE d
 IF COL_LENGTH(N'dbo.export_assemblytables', N'menu') IS NULL ALTER TABLE dbo.export_assemblytables ADD menu VARCHAR(200) NULL;
 GO
 
--- Automatically register machine tables that are not mapped yet.
+-- Register every physical dbo table. Existing mappings/statuses are preserved.
+-- Newly discovered tables start OFF; the admin can enable only the tables that
+-- should appear in the normal application UI from All Table Names.
 INSERT INTO dbo.export_tables (machinename, exportname, created_at, updated_at, status, traceability_order)
-SELECT t.TABLE_NAME, t.TABLE_NAME, GETDATE(), GETDATE(), 1, NULL
+SELECT t.TABLE_NAME, t.TABLE_NAME, GETDATE(), GETDATE(), 0, NULL
 FROM INFORMATION_SCHEMA.TABLES t
 WHERE t.TABLE_SCHEMA = 'dbo'
   AND t.TABLE_TYPE = 'BASE TABLE'
-  AND (t.TABLE_NAME LIKE 'DXP%' OR t.TABLE_NAME LIKE 'MD%' OR t.TABLE_NAME LIKE 'MES%')
   AND NOT EXISTS (
     SELECT 1 FROM dbo.export_tables e WHERE e.machinename = t.TABLE_NAME
   );
