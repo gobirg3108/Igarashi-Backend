@@ -15,6 +15,32 @@ app.setPath("sessionData", sessionDataPath);
 // Prevent random GPU rendering blocks seen on some customer PCs.
 app.disableHardwareAcceleration();
 
+// Allow only one running copy of the application.
+// If Windows startup launches the app while it is already open,
+// the existing window is restored/focused instead of creating another instance.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
+let mainWindow = null;
+
+if (gotSingleInstanceLock) {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 const getOutputPaths = () => {
   const documentsPath = app.getPath("documents");
   const rootPath = path.join(documentsPath, "Igarashi");
@@ -84,7 +110,7 @@ const {
 } = require("./databaseBackup.js");
 
 const createWindow = () => {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -98,6 +124,20 @@ const createWindow = () => {
 };
 
 app.whenReady().then(async () => {
+  // Register the installed production build to launch automatically
+  // when the Windows user signs in after boot/restart. Development runs
+  // are intentionally excluded so npm/electron testing does not alter startup.
+  if (process.platform === "win32" && app.isPackaged) {
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        path: process.execPath,
+      });
+    } catch (error) {
+      console.error("Failed to configure Windows auto-start:", error);
+    }
+  }
+
   try {
     await ensureAppSchema();
   } catch (error) {
@@ -300,7 +340,6 @@ app.whenReady().then(async () => {
   ipcMain.handle("save-barcode-scan-setting", async (event, data) => {
     return await saveBarcodeScanSetting(data);
   });
-
 
   ipcMain.handle("save-traceability-order", async (event, data) => {
     return await saveTraceabilityOrder(data);
